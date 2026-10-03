@@ -1,0 +1,15 @@
+﻿import { writeFile } from 'node:fs/promises';
+const lat = 35.874232442659526, lon = 139.61925691456358;
+const halfSize = 250, pad = 35;
+const dlat = (halfSize + pad) / 111320;
+const dlon = (halfSize + pad) / (111320 * Math.cos(lat * Math.PI / 180));
+const bbox = [lat-dlat, lon-dlon, lat+dlat, lon+dlon];
+const query = `[out:json][timeout:35];(way[building](${bbox});way[highway](${bbox});way[railway=rail](${bbox});way[waterway](${bbox});way[natural=water](${bbox});way[landuse](${bbox});way[leisure=park](${bbox});way[leisure=pitch](${bbox});relation[type=multipolygon][building](${bbox});relation[type=multipolygon][natural=water](${bbox}););out geom;`;
+const endpoint = 'https://overpass-api.de/api/interpreter';
+const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'hakoniwa-prototype/0.1' }, body: new URLSearchParams({data:query}), signal: AbortSignal.timeout(55000) });
+if (!response.ok) throw new Error(`Overpass HTTP ${response.status}`);
+const osm = await response.json();
+if (osm.remark) throw new Error(osm.remark);
+const snapshot = {center:{lat,lon}, size:500, fetchedAt:new Date().toISOString(), source:endpoint, license:'ODbL-1.0', attribution:'© OpenStreetMap contributors', osm};
+await writeFile('data/map.json', JSON.stringify(snapshot));
+console.log(JSON.stringify({elements:osm.elements.length, buildings:osm.elements.filter(e=>e.tags?.building).length, roads:osm.elements.filter(e=>e.tags?.highway).length, names:[...new Set(osm.elements.map(e=>e.tags?.name).filter(Boolean))], water:osm.elements.filter(e=>e.tags?.waterway||e.tags?.natural==='water').map(e=>({type:e.tags,points:e.geometry?.length})),buildingHeights:osm.elements.filter(e=>e.tags?.height||e.tags?.['building:levels']).map(e=>e.tags)},null,2));
