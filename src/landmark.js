@@ -1,24 +1,29 @@
 import * as THREE from 'three';
-import {PARKING_OUTLINE,SITE_ANGLE,sitePoint} from './site-corrections.js';
+import {PARKING_OUTLINE,SITE_ANGLE,sitePoint,facadeCoordinates,FACADE_WIDTH,FACADE_DEPTH} from './site-corrections.js';
 
 export function buildKotobuki({box,polygon,line,cylinder,scene,material,footprints}) {
   const lights=[];
-  const localBox=(u,y,v,w,h,d,color)=>{const [x,z]=sitePoint(u,v);box(x,y,z,w,h,d,color,SITE_ANGLE);};
+  let mainFacade=true;
+  const localBox=(u,y,v,w,h,d,color)=>{
+    if(mainFacade){[u,v]=facadeCoordinates(u,v);[w,d]=[d*FACADE_WIDTH/21,w*FACADE_DEPTH/34];}
+    const [x,z]=sitePoint(u,v);box(x,y,z,w,h,d,color,SITE_ANGLE);
+  };
   const localLine=(u1,v1,u2,v2,width,y,color,height=.06)=>line(sitePoint(u1,v1),sitePoint(u2,v2),width,y,color,height);
   function sign(u,y,v,w,h,face,paint,circle=false) {
+    if(mainFacade){[u,v]=facadeCoordinates(u,v);if(!circle)w*=face==='front'?FACADE_WIDTH/21:FACADE_DEPTH/34;}
     const canvas=document.createElement('canvas');canvas.width=1024;canvas.height=circle?1024:Math.max(128,Math.round(1024*h/w));
     const ctx=canvas.getContext('2d');paint(ctx,canvas.width,canvas.height);
     const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;
     const mat=new THREE.MeshStandardMaterial({map:texture,emissiveMap:texture,emissive:'#ffffff',emissiveIntensity:.1,roughness:.75,side:THREE.DoubleSide});lights.push(mat);
     const mesh=new THREE.Mesh(circle?new THREE.CircleGeometry(w/2,48):new THREE.PlaneGeometry(w,h),mat);
-    const [x,z]=sitePoint(u,v);mesh.position.set(x,y,z);mesh.rotation.y=face==='front'?SITE_ANGLE-Math.PI/2:SITE_ANGLE;
+    const [x,z]=sitePoint(u,v);mesh.position.set(x,y,z);mesh.rotation.y=(face==='front'?SITE_ANGLE-Math.PI/2:SITE_ANGLE)+(mainFacade?Math.PI/2:0);
     scene.add(mesh);return mesh;
   }
   const text=(ctx,label,x,y,size,color,maxWidth)=>{ctx.font=`900 ${size}px "Yu Gothic", "Meiryo", sans-serif`;ctx.fillStyle=color;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,x,y,maxWidth);};
   const main=footprints.find(b=>b.landmark==='main'),annex=footprints.find(b=>b.landmark==='annex');
   if(main){polygon(main.points,'#e6dac0',.35,11,main.holes);polygon(main.points,'#c3b9a7',11.36,.3,main.holes);}
   if(annex){polygon(annex.points,'#e8ebe4',.35,6.2,annex.holes);polygon(annex.points,'#aebeba',6.56,.3,annex.holes);}
-  // Front faces the parking lot; the long cream wall faces the road.
+  // The main pink facade now faces SE toward the road; footprint and parking stay fixed.
   localBox(.2,5.7,10.5,.45,11.4,21,'#e1a9ba');
   localBox(.15,.9,10.5,.6,1.6,21,'#98b640');
   localBox(.0,2.1,10.4,.7,3.6,7.5,'#eac048');
@@ -58,6 +63,8 @@ export function buildKotobuki({box,polygon,line,cylinder,scene,material,footprin
   localBox(25,14,10.7,7.5,5.3,7.5,'#d7d3c4');
   const roofSign=(c,w,h)=>{c.fillStyle='#d7d3c4';c.fillRect(0,0,w,h);c.lineWidth=h*.11;for(let i=0;i<4;i++){c.strokeStyle=['#de8861','#e5b649','#8eb68c','#76a9c2'][i];c.beginPath();c.arc(w*.5,h*.95,h*(.72-i*.1),Math.PI,2*Math.PI);c.stroke();}text(c,'パチンコ',w*.5,h*.2,h*.23,'#b96683',w*.9);text(c,'ことぶき',w*.5,h*.7,h*.25,'#4385a4',w*.82);};
   sign(21.2,14,10.7,7.5,5.1,'front',roofSign);sign(25,14,14.48,7.4,5.1,'side',roofSign);
+  // The low white annex and parking keep their independent geographic positions.
+  mainFacade=false;
   localBox(-.9,5.5,-5,1.6,.45,9,'#faf5df');
   for(const v of [-8,-5,-2])localBox(-.22,2.6,v,.18,3.5,2.6,'#719491');
   sign(-.18,5.1,-5.3,8.3,1.2,'front',(c,w,h)=>{c.fillStyle='#f4f0df';c.fillRect(0,0,w,h);text(c,'Pachinko ことぶき',w*.5,h*.5,h*.59,'#b5779a',w*.94);});

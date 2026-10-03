@@ -19,6 +19,7 @@ try {
     assert.equal(state.center.lat,35.874232442659526);assert.equal(state.center.lon,139.61925691456358);
     assert.ok(state.buildings>0);assert.ok(state.cars>0);assert.ok(state.triangles>0);
     assert.equal(state.dayDurationSeconds,180);assert.equal(state.parkingCorrections,1);assert.equal(state.referenceBuildings,2);assert.ok(state.parkedCars>0);
+    assert.equal(state.removedBuildings,2);assert.equal(state.landmarkFront,'southeast');
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     await page.screenshot({path:`artifacts/${name}-day.png`,fullPage:true});
     await page.locator('[data-view="top"]').click();await page.waitForTimeout(1000);

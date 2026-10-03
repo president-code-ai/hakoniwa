@@ -11,7 +11,7 @@ import {buildKotobuki} from './landmark.js';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const state = {ready:false, moving:!reducedMotion, view:'overview', time:6, dayDurationSeconds:DAY_DURATION_MS/1000, buildings:0, estimated:0, fromLevels:0, roads:0, cars:0, frames:0, parkingCorrections:0, referenceBuildings:0};
+const state = {ready:false, moving:!reducedMotion, view:'overview', time:6, dayDurationSeconds:DAY_DURATION_MS/1000, buildings:0, estimated:0, fromLevels:0, roads:0, cars:0, frames:0, parkingCorrections:0, referenceBuildings:0, removedBuildings:0, landmarkFront:'southeast'};
 const fail = message => { $('loading').hidden = true; $('error').hidden = false; $('error-text').textContent = message; };
 $('reload').onclick = () => location.reload();
 for (const id of ['about-open','data-open']) $(id).onclick = () => $('about').showModal();
@@ -110,6 +110,7 @@ async function start() {
     if(!valid(points))continue;
     const landmark=correctionFor(points);
     if(landmark==='parking'){state.parkingCorrections++;continue;}
+    if(landmark==='removed'){state.removedBuildings++;continue;}
     const center=points.reduce((acc,p)=>[acc[0]+p[0]/points.length,acc[1]+p[1]/points.length],[0,0]);
     const matches=osmBuildings.filter(b=>pointInPolygon(center,b.points)||points.some(p=>pointInPolygon(p,b.points)));
     matches.sort((a,b)=>Math.abs(polygonArea(a.points)-polygonArea(points))-Math.abs(polygonArea(b.points)-polygonArea(points)));
@@ -256,7 +257,7 @@ async function start() {
   let transition=null, simTime=0,last=performance.now(),frameTimes=[],fps=60,qualityReduced=false;
   function applyView(view, instant=false) {
     state.view=view;
-    const positions={overview:new THREE.Vector3(550,550,650),top:new THREE.Vector3(0,950,.1),close:new THREE.Vector3(-190,160,210)};
+    const positions={overview:new THREE.Vector3(550,550,650),top:new THREE.Vector3(0,950,.1),close:new THREE.Vector3(120,250,300)};
     const zoom=view==='close'?3.2:1;
     const target=positions[view];
     if(instant||reducedMotion){camera.position.copy(target);camera.zoom=zoom;camera.updateProjectionMatrix();controls.update();transition=null;}
