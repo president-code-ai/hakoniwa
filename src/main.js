@@ -5,10 +5,13 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import snapshot from '../data/map.json';
 import gsi from '../data/buildings-gsi.json';
 import {project, clipPolygon, clipSegment, polygonArea, readHeight, joinRings, pointInPolygon} from './geo.js';
+import {DayClock,DAY_DURATION_MS,daylightAt,formatHour} from './day-cycle.js';
+import {correctionFor,LANDMARK_HEIGHTS} from './site-corrections.js';
+import {buildKotobuki} from './landmark.js';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const state = {ready:false, moving:!reducedMotion, view:'overview', time:15, buildings:0, estimated:0, fromLevels:0, roads:0, cars:0, frames:0};
+const state = {ready:false, moving:!reducedMotion, view:'overview', time:6, dayDurationSeconds:DAY_DURATION_MS/1000, buildings:0, estimated:0, fromLevels:0, roads:0, cars:0, frames:0, parkingCorrections:0, referenceBuildings:0};
 const fail = message => { $('loading').hidden = true; $('error').hidden = false; $('error-text').textContent = message; };
 $('reload').onclick = () => location.reload();
 for (const id of ['about-open','data-open']) $(id).onclick = () => $('about').showModal();
@@ -105,11 +108,13 @@ async function start() {
   for(const [index,building] of gsi.buildings.entries()) {
     const points=building.outline,holes=building.holes;
     if(!valid(points))continue;
+    const landmark=correctionFor(points);
+    if(landmark==='parking'){state.parkingCorrections++;continue;}
     const center=points.reduce((acc,p)=>[acc[0]+p[0]/points.length,acc[1]+p[1]/points.length],[0,0]);
     const matches=osmBuildings.filter(b=>pointInPolygon(center,b.points)||points.some(p=>pointInPolygon(p,b.points)));
     matches.sort((a,b)=>Math.abs(polygonArea(a.points)-polygonArea(points))-Math.abs(polygonArea(b.points)-polygonArea(points)));
     const match=matches[0];
-    buildingPolygons.push({points,holes,e:{id:match?.e.id??100000+index,tags:match?.e.tags??{building:'yes'}}});
+    buildingPolygons.push({points,holes,landmark,e:{id:match?.e.id??100000+index,tags:match?.e.tags??{building:'yes'}}});
   }
   for(const e of elements) {
     if(e.type!=='way'||!e.geometry) continue;
@@ -173,7 +178,8 @@ async function start() {
   const windowTransforms=[];const temp=new THREE.Object3D();
   const walls=['#ece5d4','#e5decb','#e1e4db','#d7e0d9','#f0e8d7','#cbd6cd'];
   const roofs=['#637e79','#7d9296','#82908f','#b28670','#577b76','#a0aaa1'];
-  for(const {e,points,holes} of buildingPolygons) {
+  for(const {e,points,holes,landmark} of buildingPolygons) {
+    if(landmark){state.buildings++;state.estimated++;state.referenceBuildings++;continue;}
     const area=polygonArea(points),heightInfo=readHeight(e.tags,area),height=heightInfo.value;
     state.buildings++;if(heightInfo.estimated)state.estimated++;if(heightInfo.fromLevels)state.fromLevels++;
     const roofColor=roofs[e.id%roofs.length];
@@ -207,6 +213,8 @@ async function start() {
   const windowMaterial=new THREE.MeshStandardMaterial({color:'#648881',emissive:'#ffb764',emissiveIntensity:0,roughness:.5});
   const windows=new THREE.InstancedMesh(windowGeometry,windowMaterial,windowTransforms.length);
   windowTransforms.forEach((m,i)=>windows.setMatrixAt(i,m));windows.instanceMatrix.needsUpdate=true;scene.add(windows);
+  const landmark=buildKotobuki({box,polygon,line,cylinder,scene,material,footprints:buildingPolygons});
+  state.parkedCars=landmark.parkedCars;
 
   // Edge ticks are a miniature model's scale marks: 10 ticks, each 50 metres.
   for(let i=-200;i<=200;i+=50){box(i,.06,247,.7,.15,4,'#b2b9a8');box(-247,.06,i,4,.15,.7,'#b2b9a8');}
@@ -222,7 +230,8 @@ async function start() {
   const pinBody=new THREE.Mesh(new THREE.ConeGeometry(2.3,6,20),pinMaterial);pinBody.rotation.z=Math.PI;pinBody.position.y=9;pin.add(pinBody);
   const pinHead=new THREE.Mesh(new THREE.SphereGeometry(2.5,16,12),pinMaterial);pinHead.position.y=12;pin.add(pinHead);
   const centerBuildings=buildingPolygons.filter(b=>pointInPolygon([0,0],b.points));
-  pin.position.y=centerBuildings.length?Math.max(...centerBuildings.map(b=>readHeight(b.e.tags,polygonArea(b.points)).value)):0;
+  const pinBase=centerBuildings.length?Math.max(...centerBuildings.map(b=>LANDMARK_HEIGHTS[b.landmark]??readHeight(b.e.tags,polygonArea(b.points)).value)):0;
+  pin.position.y=pinBase;
   scene.add(pin);
 
   const cars=[];
@@ -241,14 +250,14 @@ async function start() {
   }
   state.cars=cars.length;
   $('building-count').textContent=state.buildings;
-  $('data-summary').textContent=`地図取得：${new Date(gsi.fetchedAt).toLocaleDateString('ja-JP')} ／ 建物の輪郭 ${state.buildings}件。そのうち高さを推定したもの ${state.estimated}件（階数の記録あり ${state.fromLevels}件）。隣接して接する建物は一体になる場合があります。`;
+  $('data-summary').textContent=`地図取得：${new Date(gsi.fetchedAt).toLocaleDateString('ja-JP')} ／ 建物の輪郭 ${state.buildings}件。そのうち高さを推定したもの ${state.estimated}件（階数の記録あり ${state.fromLevels}件）。中央の店舗と平置き駐車場は提供された写真・指摘に基づき補正しています。隣接して接する建物は一体になる場合があります。`;
   document.querySelector('.place-meta').innerHTML='<span class="location-dot"></span>さいたま市中央区・上峰 <strong>500 m 四方</strong>';
 
   let transition=null, simTime=0,last=performance.now(),frameTimes=[],fps=60,qualityReduced=false;
   function applyView(view, instant=false) {
     state.view=view;
-    const positions={overview:new THREE.Vector3(550,550,650),top:new THREE.Vector3(0,950,.1),close:new THREE.Vector3(190,155,250)};
-    const zoom=view==='close'?2.35:1;
+    const positions={overview:new THREE.Vector3(550,550,650),top:new THREE.Vector3(0,950,.1),close:new THREE.Vector3(-190,160,210)};
+    const zoom=view==='close'?3.2:1;
     const target=positions[view];
     if(instant||reducedMotion){camera.position.copy(target);camera.zoom=zoom;camera.updateProjectionMatrix();controls.update();transition=null;}
     else transition={from:camera.position.clone(),to:target,zoomFrom:camera.zoom,zoomTo:zoom,start:performance.now(),duration:850};
@@ -271,26 +280,36 @@ async function start() {
   $('zoom-in').onclick=()=>zoomBy(1.25);$('zoom-out').onclick=()=>zoomBy(.8);
   $('north').onclick=()=>applyView('top');
   $('rotate').onclick=()=>{controls.autoRotate=!controls.autoRotate;$('rotate').setAttribute('aria-pressed',String(controls.autoRotate));};
-  function updateMotionButton(){$('motion').setAttribute('aria-pressed',String(state.moving));$('motion').innerHTML=state.moving?'<span aria-hidden="true">Ⅱ</span> 動きを止める':'<span aria-hidden="true">▷</span> 動かす';}
-  $('motion').onclick=()=>{state.moving=!state.moving;updateMotionButton();};updateMotionButton();
-  const dayBackground=new THREE.Color('#f4f6f7'),duskBackground=new THREE.Color('#eee5dd'),nightBackground=new THREE.Color('#182a28');
-  function setTime(value){
-    state.time=value;const t=value/100,night=THREE.MathUtils.smoothstep(t,.40,1);
-    const color=t<.5?dayBackground.clone().lerp(duskBackground,t*2):duskBackground.clone().lerp(nightBackground,(t-.5)*2);
-    scene.background.copy(color);
-    hemi.intensity=1.9*(1-night)+.6*night;
-    sun.intensity=2.2*(1-night)+.18*night;
-    sun.color.set('#fff0d3').lerp(new THREE.Color('#ffab66'),Math.sin(t*Math.PI)*.7);
-    sun.position.set(-220,450-320*t,240);
-    fill.intensity=.7-.35*night;
-    windowMaterial.color.set('#648881').lerp(new THREE.Color('#ffdd91'),night);
-    windowMaterial.emissiveIntensity=night*2;
+  const dayClock=new DayClock(performance.now(),6,state.moving);
+  let scrubbing=false;
+  function updateMotionButton(){$('motion').setAttribute('aria-pressed',String(state.moving));$('motion').innerHTML=state.moving?'<span aria-hidden="true">Ⅱ</span> 一時停止':'<span aria-hidden="true">▷</span> 再生';}
+  $('motion').onclick=()=>{state.moving=!state.moving;const now=performance.now();dayClock.setRunning(state.moving&&!scrubbing,now);setTime(dayClock.sample(now));updateMotionButton();};updateMotionButton();
+  const skyStops=[[0,'#182a28'],[4,'#182a28'],[5,'#758887'],[6,'#edd8c4'],[8,'#f4f6f7'],[15,'#f4f6f7'],[17,'#ebc6ad'],[18,'#93828b'],[19,'#182a28'],[24,'#182a28']].map(([hour,color])=>[hour,new THREE.Color(color)]);
+  const warmSun=new THREE.Color('#ffaf70'),litWindows=new THREE.Color('#ffdd91');
+  function setTime(hour){
+    state.time=hour;const {daylight,night,altitude,warmth,label}=daylightAt(hour);
+    let next=1;while(next<skyStops.length-1&&skyStops[next][0]<hour)next++;
+    const a=skyStops[next-1],b=skyStops[next],t=(hour-a[0])/(b[0]-a[0]);
+    scene.background.copy(a[1]).lerp(b[1],t*t*(3-2*t));
+    hemi.intensity=.6+1.3*daylight;sun.intensity=2.2*daylight;
+    sun.color.set('#fff0d3').lerp(warmSun,warmth*.8);
+    const angle=(hour-6)/12*Math.PI;
+    sun.position.set(Math.cos(angle)*450,Math.max(25,altitude*450),-130);
+    fill.intensity=.35+.35*daylight;
+    windowMaterial.color.set('#648881').lerp(litWindows,night);windowMaterial.emissiveIntensity=night*2;
+    for(const mat of landmark.lights)mat.emissiveIntensity=.08+night*.95;
     renderer.toneMappingExposure=1+.17*night;
-    $('time-label').textContent=t<.38?'昼の街':t<.7?'夕暮れの街':'夜の街';
-    const hour=13+Math.round(t*7);$('time-value').value=String(hour).padStart(2,'0')+':00';
-    document.body.classList.toggle('night',t>.8);
+    $('time-label').textContent=label;
+    $('time-value').value=formatHour(hour);
+    if(!scrubbing)$('time').value=String(hour);
+    $('time').setAttribute('aria-valuetext',formatHour(hour));
+    document.body.classList.toggle('night',hour<5.4||hour>=18.5);
   }
-  $('time').oninput=e=>setTime(Number(e.target.value));setTime(state.time);
+  $('time').oninput=e=>{dayClock.seek(Number(e.target.value),performance.now());setTime(dayClock.sample(performance.now()));};
+  $('time').addEventListener('pointerdown',()=>{scrubbing=true;dayClock.setRunning(false,performance.now());});
+  const finishScrub=()=>{if(scrubbing){scrubbing=false;dayClock.setRunning(state.moving,performance.now());}};
+  window.addEventListener('pointerup',finishScrub);window.addEventListener('pointercancel',finishScrub);$('time').addEventListener('blur',finishScrub);
+  setTime(state.time);
   function moveCars(){
     for(const vehicle of cars){
       const {car,path,lengths,total,offset,direction}=vehicle;
@@ -308,10 +327,12 @@ async function start() {
   function animate(now){
     const rawDelta=(now-last)/1000,dt=Math.min(rawDelta,.05);last=now;
     if(document.hidden)return;
+    setTime(dayClock.sample(now));
     if(state.moving)simTime+=dt;
     if(transition){const t=THREE.MathUtils.clamp((now-transition.start)/transition.duration,0,1),ease=t*t*(3-2*t);camera.position.lerpVectors(transition.from,transition.to,ease);camera.zoom=THREE.MathUtils.lerp(transition.zoomFrom,transition.zoomTo,ease);camera.updateProjectionMatrix();if(t===1)transition=null;}
-    if(state.moving){moveCars();pin.position.y=(centerBuildings.length?Math.max(...centerBuildings.map(b=>readHeight(b.e.tags,polygonArea(b.points)).value)):0)+Math.sin(simTime*1.6)*.5;ring.scale.setScalar(1+Math.sin(simTime*1.5)*.06);}
+    if(state.moving){moveCars();pin.position.y=pinBase+Math.sin(simTime*1.6)*.5;ring.scale.setScalar(1+Math.sin(simTime*1.5)*.06);}
     controls.update(dt);
+    document.body.classList.toggle('close-view',camera.zoom>1.7);
     const angle=Math.atan2(camera.position.x,camera.position.z);$('compass-needle').style.transform=`rotate(${-angle}rad)`;
     renderer.render(scene,camera);state.frames++;
     if(rawDelta>0&&rawDelta<.5)frameTimes.push(rawDelta);

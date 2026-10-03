@@ -18,6 +18,7 @@ try {
     let state=await page.evaluate(()=>window.hakoniwa.getState());
     assert.equal(state.center.lat,35.874232442659526);assert.equal(state.center.lon,139.61925691456358);
     assert.ok(state.buildings>0);assert.ok(state.cars>0);assert.ok(state.triangles>0);
+    assert.equal(state.dayDurationSeconds,180);assert.equal(state.parkingCorrections,1);assert.equal(state.referenceBuildings,2);assert.ok(state.parkedCars>0);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     await page.screenshot({path:`artifacts/${name}-day.png`,fullPage:true});
     await page.locator('[data-view="top"]').click();await page.waitForTimeout(1000);
@@ -25,12 +26,14 @@ try {
     await page.screenshot({path:`artifacts/${name}-top.png`,fullPage:true});
     await page.locator('[data-view="close"]').click();await page.waitForTimeout(1000);
     assert.ok((await page.evaluate(()=>window.hakoniwa.getState().zoom))>2);
-    await page.locator('#zoom-out').click();assert.ok((await page.evaluate(()=>window.hakoniwa.getState().zoom))<2.35);
+    await page.screenshot({path:`artifacts/${name}-landmark.png`,fullPage:true});
+    const closeZoom=await page.evaluate(()=>window.hakoniwa.getState().zoom);
+    await page.locator('#zoom-out').click();assert.ok((await page.evaluate(()=>window.hakoniwa.getState().zoom))<closeZoom);
     await page.locator('[data-view="overview"]').click();await page.waitForTimeout(1000);
-    await page.locator('#time').fill('100');await page.locator('#time').dispatchEvent('input');
+    await page.locator('#time').fill('21');await page.locator('#time').dispatchEvent('input');
     assert.equal(await page.locator('#time-label').textContent(),'夜の街');
     await page.screenshot({path:`artifacts/${name}-night.png`,fullPage:true});
-    await page.locator('#motion').click();const stopped=await page.evaluate(()=>window.hakoniwa.getState().simTime);await page.waitForTimeout(200);assert.equal(await page.evaluate(()=>window.hakoniwa.getState().simTime),stopped);
+    await page.locator('#motion').click();const stopped=await page.evaluate(()=>window.hakoniwa.getState());await page.waitForTimeout(200);assert.equal(await page.evaluate(()=>window.hakoniwa.getState().simTime),stopped.simTime);assert.equal(await page.evaluate(()=>window.hakoniwa.getState().time),stopped.time);
     await page.locator('#rotate').click();assert.equal(await page.evaluate(()=>window.hakoniwa.getState().autoRotate),true);
     await page.locator('#rotate').click();await page.locator('#about-open').click();assert.equal(await page.locator('#about').evaluate(e=>e.open),true);
     assert.ok((await page.locator('#data-summary').textContent()).includes('件'));await page.locator('#about-close').click();
